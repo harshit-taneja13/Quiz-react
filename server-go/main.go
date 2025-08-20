@@ -20,6 +20,8 @@ type Submission struct {
 	Name      string `json:"name"`
 	Phone     string `json:"phone"`
 	LinkedIn  string `json:"linkedin,omitempty"`
+	GlobalScore int  `json:"global_score"`
+	TotalScore int    `json:"total_score"`
 	Timestamp string `json:"timestamp"`
 }
 
@@ -139,6 +141,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		Phone    string `json:"phone"`
 		LinkedIn string `json:"linkedin"`
 	}
+
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&in); err != nil {
@@ -155,12 +158,20 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		Name:      strings.TrimSpace(in.Name),
 		Phone:     strings.TrimSpace(in.Phone),
 		LinkedIn:  strings.TrimSpace(in.LinkedIn),
+		GlobalScore: 0,
+		TotalScore:  0,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 
 	if err := appendSubmissionToGitHub(r.Context(), submission); err != nil {
 		log.Printf("append to GitHub failed: %v", err)
 		http.Error(w, "failed to update GitHub file", http.StatusInternalServerError)
+		return
+	}
+
+	if err := appendSubmissionToLocalFile(submission); err != nil {
+		log.Printf("append to local file failed: %v", err)
+		http.Error(w, "failed to save submission locally", http.StatusInternalServerError)
 		return
 	}
 
@@ -198,6 +209,44 @@ func appendSubmissionToGitHub(ctx context.Context, item Submission) error {
 
 	// PUT updated content
 	return putGitHubFile(ctx, updated, sha)
+}
+
+func appendSubmissionToLocalFile(item Submission) error {
+    filePath := "../Users/data.json"
+    
+    // Read existing file or create empty array if file doesn't exist
+    var submissions []Submission
+    
+    if data, err := os.ReadFile(filePath); err == nil {
+        // File exists, try to parse it
+        if err := json.Unmarshal(data, &submissions); err != nil {
+            // If parsing fails, start with empty array
+            submissions = []Submission{}
+        }
+    } else {
+        // File doesn't exist, start with empty array
+        submissions = []Submission{}
+        
+        // Ensure the directory exists
+        if err := os.MkdirAll("../Users", 0755); err != nil {
+            return fmt.Errorf("failed to create directory: %v", err)
+        }
+    }
+    
+    // Append new submission
+    submissions = append(submissions, item)
+    
+    // Write back to file with proper formatting
+    data, err := json.MarshalIndent(submissions, "", "  ")
+    if err != nil {
+        return fmt.Errorf("failed to marshal JSON: %v", err)
+    }
+    
+    if err := os.WriteFile(filePath, data, 0644); err != nil {
+        return fmt.Errorf("failed to write file: %v", err)
+    }
+    
+    return nil
 }
 
 var errNotFound = errors.New("github file not found")
